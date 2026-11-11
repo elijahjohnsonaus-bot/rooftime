@@ -1,5 +1,5 @@
 {
-  "base": "https://pub-REPLACE-ME.r2.dev",
+  "base": "https://pub-c93d3b1c1cb74376bc19758ac3a47d65.r2.dev",
   "ages": ["0-3 months", "3-6 months", "6-12 months"],
   "videos": [
     { "title": "Black and white shapes", "age": "0-3 months", "file": "bw-shapes.mp4" },
