@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ceiling Time</title>
+<style>
+:root{--ink:#090a13;--card:#14172b;--sel:#222850;--moon:#e8e4f2;--lamp:#f5c978}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--ink);color:var(--moon);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif}
+header{position:relative;overflow:hidden;padding:44px 32px 16px}
+.moon{position:absolute;right:-40px;top:-70px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#f4efe0,#b9b2d6 55%,transparent 72%);opacity:.35;animation:drift 90s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate(-140px,30px)}}
+h1{position:relative;margin:0;font:400 2.7rem Georgia,"Times New Roman",serif;letter-spacing:.01em}
+.sub{position:relative;margin:8px 0 0;opacity:.65;font-size:1.15rem}
+button{font:inherit;color:inherit;border:0;cursor:pointer}
+button:focus{outline:none;box-shadow:0 0 0 4px var(--lamp)}
+#tabs{display:flex;gap:14px;flex-wrap:wrap;padding:14px 32px}
+#tabs button{display:flex;align-items:center;gap:12px;background:var(--card);padding:16px 26px;border-radius:40px;font-size:1.3rem}
+#tabs button.sel{background:var(--sel)}
+.dot{width:16px;height:16px;border-radius:50%;background:hsl(var(--h) 65% 72%)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;padding:16px 32px 56px}
+.tile{position:relative;overflow:hidden;min-height:150px;padding:20px;text-align:left;background:var(--card);border-radius:12px 32px 12px 32px;font-size:1.35rem;line-height:1.25;display:flex;align-items:flex-end}
+.tile::before{content:"";position:absolute;right:-30px;top:-30px;width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,hsl(var(--h) 60% 65% / .55),transparent 70%)}
+.tile span{position:relative;z-index:1;text-shadow:0 1px 6px rgba(0,0,0,.7)}
+.tile canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.75)}
+.tile.has::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,rgba(0,0,0,.65))}
+.tile.all{background:var(--sel);align-items:center}
+#msg{padding:14px 32px;opacity:.8;font-size:1.2rem;max-width:44rem;line-height:1.4}
+#player{position:fixed;inset:0;background:#000;display:none}
+#vid{width:100%;height:100%;object-fit:contain}
+#vid.flip{transform:rotate(180deg)}
+#bar{position:absolute;left:0;right:0;bottom:0;padding:28px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,.85));transition:opacity .4s}
+#bar button{background:rgba(255,255,255,.14);padding:14px 24px;border-radius:40px;font-size:1.2rem}
+#bar.hide{opacity:0;pointer-events:none}
+#fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 8s linear}
+#dim{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+#player.idle{cursor:none}
+@media (prefers-reduced-motion:reduce){.moon{animation:none}#bar,#fade{transition:none}}
+</style>
+</head>
+<body>
+<header><div class="moon"></div><h1>Ceiling Time</h1><p class="sub">Pick an age, pick a video, lie back.</p></header>
+<nav id="tabs"></nav>
+<div id="msg" hidden></div>
+<div id="grid"></div>
+
+<div id="player">
+  <video id="vid" playsinline></video>
+  <div id="dim"></div>
+  <div id="fade"></div>
+  <div id="bar" class="hide">
+    <button id="bBack">Back</button>
+    <button id="bPrev">Previous</button>
+    <button id="bNext">Next</button>
+    <button id="bMode">Loop one</button>
+    <button id="bSound">Sound on</button>
+    <button id="bFull">Full screen</button>
+    <button id="bDim">Dim off</button>
+    <button id="bFlip">Flip</button>
+    <button id="bTimer">Timer off</button>
+  </div>
+</div>
+
+<script>
+const BASE='https://pub-c93d3b1c1cb74376bc19758ac3a47d65.r2.dev';
+const HUES=[258,310,28,170,205,50];
+const $=s=>document.querySelector(s);
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const TIMERS=[0,15,30,60],DIMS=[0,.35,.65];
+let dIdx=0,vids=[],ages=[],age,list=[],idx=0,mode=store.get('mode')||'one',tIdx=0,tTimer=null,hideT=null,lock=null,faded=false;
+const vid=$('#vid'),bar=$('#bar'),fade=$('#fade'),player=$('#player');
+
+function say(t){const m=$('#msg');m.textContent=t;m.hidden=!t}
+async function init(){
+  try{
+    const keys=await (await fetch('/api/videos')).json();
+    vids=keys.map(k=>{
+      const p=k.split('/'),file=p.pop(),t=file.replace(/\.[^.]+$/,'').replace(/[-_]+/g,' ').trim();
+      return{key:k,age:p.length?p[0]:'More',title:t.charAt(0).toUpperCase()+t.slice(1)};
+    });
+  }catch(e){say('Couldn’t load the video list. Check the R2 binding in wrangler.jsonc and that the bucket exists.');return}
+  ages=[...new Set(vids.map(v=>v.age))].sort((a,b)=>(parseFloat(a)||999)-(parseFloat(b)||999)||a.localeCompare(b));
+  if(!ages.length){say('No videos yet. In your R2 bucket, put each video inside an age folder, like “0-3 months”.');return}
+  age=store.get('age');if(!ages.includes(age))age=ages[0];
+  if(BASE.includes('REPLACE-ME'))say('Set BASE at the top of index.html to your R2 public link.');
+  drawTabs();drawGrid();
+  const f=document.querySelector('.tile');if(f)f.focus();
+}
+const hue=a=>HUES[ages.indexOf(a)%HUES.length];
+function drawTabs(){
+  const t=$('#tabs');t.innerHTML='';
+  ages.forEach(a=>{
+    const b=document.createElement('button');
+    b.innerHTML='<span class="dot" style="--h:'+hue(a)+'"></span>';
+    b.appendChild(document.createTextNode(a));
+    if(a===age)b.className='sel';
+    b.onclick=()=>{age=a;store.set('age',a);drawTabs();drawGrid();[...document.querySelectorAll('#tabs button')][ages.indexOf(a)].focus()};
+    t.appendChild(b);
+  });
+}
+function drawGrid(){
+  thumbGen++;thumbQ.length=0;
+  list=vids.filter(v=>v.age===age).sort((a,b)=>a.title.localeCompare(b.title));
+  const g=$('#grid');g.innerHTML='';g.style.setProperty('--h',hue(age));
+  g.style.cssText='--h:'+hue(age);
+  const all=document.createElement('button');all.className='tile all';all.innerHTML='<span>Play all in order</span>';
+  all.onclick=()=>play(0,'all');g.appendChild(all);
+  list.forEach((v,i)=>{
+    const b=document.createElement('button');b.className='tile';
+    b.innerHTML='<span></span>';b.firstChild.textContent=v.title;
+    b.onclick=()=>play(i,'one');g.appendChild(b);queueThumb(b,v,thumbGen);
+  });
+}
+function url(v){return BASE.replace(/\/$/,'')+'/'+v.key.split('/').map(encodeURIComponent).join('/')}
+function load(){
+  vid.src=url(list[idx]);vid.loop=mode==='one';
+  vid.muted=store.get('muted')==='1';
+  vid.className=store.get('flip')==='1'?'flip':'';
+  vid.play().catch(()=>{});labels();
+}
+function labels(){
+  $('#bMode').textContent={one:'Loop one',all:'Play all',shuffle:'Shuffle'}[mode]||'Loop one';
+  $('#bDim').textContent=dIdx?'Dim '+['','low','high'][dIdx]:'Dim off';
+  $('#bFull').textContent=fsEl()?'Exit full screen':'Full screen';
+  $('#bSound').textContent=vid.muted?'Sound off':'Sound on';
+  $('#bTimer').textContent=TIMERS[tIdx]?'Timer '+TIMERS[tIdx]+' min':'Timer off';
+}
+async function wake(){try{lock=await navigator.wakeLock.request('screen')}catch(e){}}
+function play(i,m){mode=m;store.set('mode',m);idx=i;player.style.display='block';unfade();load();wake();showBar();goFull()}
+function close(){
+  vid.pause();vid.removeAttribute('src');vid.load();player.style.display='none';exitFull();
+  clearTimeout(tTimer);tIdx=0;unfade();
+  try{lock&&lock.release()}catch(e){}
+  const f=document.querySelector('.tile');if(f)f.focus();
+}
+function showBar(){
+  bar.classList.remove('hide');player.classList.remove('idle');clearTimeout(hideT);
+  hideT=setTimeout(()=>{bar.classList.add('hide');player.classList.add('idle');document.activeElement&&document.activeElement.blur()},5000);
+}
+function unfade(){
+  if(faded){faded=false;fade.style.transition='none';fade.style.opacity=0;vid.play().catch(()=>{})}
+  else fade.style.opacity=0;
+}
+function setTimer(){
+  tIdx=(tIdx+1)%TIMERS.length;clearTimeout(tTimer);
+  if(TIMERS[tIdx])tTimer=setTimeout(()=>{
+    faded=true;fade.style.transition='opacity 8s linear';fade.style.opacity=1;
+    setTimeout(()=>{if(faded)vid.pause()},8000);
+  },TIMERS[tIdx]*60000);
+  labels();
+}
+vid.onended=()=>{if(mode==='all'){idx=(idx+1)%list.length;load()}else if(mode==='shuffle')pickRandom()};
+function pickRandom(){if(list.length>1){let n;do{n=Math.floor(Math.random()*list.length)}while(n===idx);idx=n}load()}
+$('#bBack').onclick=close;
+$('#bNext').onclick=()=>{if(mode==='shuffle')pickRandom();else{idx=(idx+1)%list.length;load()}};
+$('#bPrev').onclick=()=>{idx=(idx-1+list.length)%list.length;load()};
+$('#bMode').onclick=()=>{const M=['one','all','shuffle'];mode=M[(M.indexOf(mode)+1)%3];store.set('mode',mode);vid.loop=mode==='one';labels()};
+$('#bSound').onclick=()=>{vid.muted=!vid.muted;store.set('muted',vid.muted?'1':'0');labels()};
+$('#bFlip').onclick=()=>{const f=store.get('flip')==='1'?'0':'1';store.set('flip',f);vid.className=f==='1'?'flip':''};
+$('#bTimer').onclick=setTimer;
+$('#bDim').onclick=()=>{dIdx=(dIdx+1)%DIMS.length;$('#dim').style.opacity=DIMS[dIdx];labels()};
+
+const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
+function goFull(){
+  try{
+    const r=player.requestFullscreen||player.webkitRequestFullscreen;
+    if(r)Promise.resolve(r.call(player)).catch(()=>{});
+    else if(vid.webkitEnterFullscreen)vid.webkitEnterFullscreen();
+  }catch(e){}
+}
+function exitFull(){try{if(fsEl())(document.exitFullscreen||document.webkitExitFullscreen).call(document)}catch(e){}}
+$('#bFull').onclick=()=>fsEl()?exitFull():goFull();
+document.addEventListener('fullscreenchange',labels);
+document.addEventListener('webkitfullscreenchange',labels);
+
+const thumbQ=[];let thumbBusy=false,thumbGen=0;
+function queueThumb(tile,v,gen){thumbQ.push({tile,v,gen});if(!thumbBusy)nextThumb()}
+function nextThumb(){
+  const t=thumbQ.shift();
+  if(!t){thumbBusy=false;return}
+  thumbBusy=true;
+  const tv=document.createElement('video');
+  tv.muted=true;tv.preload='metadata';tv.playsInline=true;
+  let done=false;
+  const fin=()=>{if(done)return;done=true;tv.removeAttribute('src');tv.load();nextThumb()};
+  tv.onloadedmetadata=()=>{tv.currentTime=Math.min(3,(tv.duration||2)/2)};
+  tv.onseeked=()=>{
+    try{
+      const c=document.createElement('canvas');c.width=320;c.height=180;
+      c.getContext('2d').drawImage(tv,0,0,320,180);
+      t.tile.insertBefore(c,t.tile.firstChild);t.tile.classList.add('has');
+    }catch(e){}
+    fin();
+  };
+  tv.onerror=fin;setTimeout(fin,8000);
+  tv.src=url(t.v);
+}
+player.addEventListener('click',e=>{if(e.target===vid||e.target===fade){faded?unfade():showBar()}});
+
+function move(d){
+  const root=player.style.display==='block'?bar:document.body;
+  const bs=[...root.querySelectorAll('button')].filter(b=>b.offsetParent);
+  const cur=document.activeElement;
+  if(!bs.includes(cur)){bs[0]&&bs[0].focus();return}
+  const r=cur.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let best=null,bd=1e9;
+  bs.forEach(b=>{
+    if(b===cur)return;
+    const q=b.getBoundingClientRect(),x=q.left+q.width/2-cx,y=q.top+q.height/2-cy;
+    const h=d==='L'||d==='R';
+    const ok=d==='L'?(x<-5&&Math.abs(y)<r.height/2):d==='R'?(x>5&&Math.abs(y)<r.height/2):d==='U'?y<-5:y>5;
+    if(!ok)return;
+    const dist=h?Math.abs(x):Math.hypot(x*2,y);
+    if(dist<bd){bd=dist;best=b}
+  });
+  if(best)best.focus();
+}
+document.addEventListener('keydown',e=>{
+  const k=e.key;
+  if(player.style.display==='block'){
+    if(faded){unfade();showBar();e.preventDefault();return}
+    if(k==='Escape'||k==='Backspace'){close();e.preventDefault();return}
+    if(bar.classList.contains('hide')){showBar();bar.querySelector('button').focus();e.preventDefault();return}
+    showBar();
+  }
+  const dir={ArrowLeft:'L',ArrowRight:'R',ArrowUp:'U',ArrowDown:'D'}[k];
+  if(dir){move(dir);e.preventDefault()}
+});
+init();
+</script>
+</body>
+</html>
