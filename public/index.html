@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ceiling Time</title>
+<style>
+:root{--night:#0b0c12;--card:#171a28;--sel:#262c47;--mist:#d9dcea;--lamp:#f2c879}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--night);color:var(--mist);font-family:"Trebuchet MS",system-ui,sans-serif}
+h1{font-size:2.2rem;font-weight:500;margin:28px 28px 4px}
+p.sub{margin:0 28px;opacity:.6}
+button{font:inherit;font-size:1.3rem;color:inherit;background:var(--card);border:4px solid transparent;border-radius:18px;padding:16px 26px;cursor:pointer}
+button:focus-visible,button:focus{outline:none;border-color:var(--lamp)}
+nav{display:flex;gap:12px;flex-wrap:wrap;padding:20px 28px 8px}
+nav button{border-radius:40px}
+nav button.sel{background:var(--sel)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;padding:12px 28px 48px}
+.tile{min-height:130px;text-align:left;border-radius:10px 28px 10px 28px}
+.all{background:var(--sel)}
+#empty{padding:28px;opacity:.7}
+#player{position:fixed;inset:0;background:#000;display:none}
+#vid{width:100%;height:100%;object-fit:contain}
+#vid.flip{transform:rotate(180deg)}
+#bar{position:absolute;left:0;right:0;bottom:0;padding:28px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,.85));transition:opacity .4s}
+#bar.hide{opacity:0;pointer-events:none}
+#fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 8s linear}
+@media (prefers-reduced-motion:reduce){#bar,#fade{transition:none}}
+</style>
+</head>
+<body>
+<h1>Ceiling Time</h1>
+<p class="sub">Pick an age, pick a video, lie back.</p>
+<nav id="tabs"></nav>
+<div id="grid"></div>
+
+<div id="player">
+  <video id="vid" playsinline></video>
+  <div id="fade"></div>
+  <div id="bar" class="hide">
+    <button id="bBack">Back</button>
+    <button id="bNext">Next</button>
+    <button id="bMode">Loop one</button>
+    <button id="bSound">Sound on</button>
+    <button id="bFlip">Flip</button>
+    <button id="bTimer">Timer off</button>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const TIMERS=[0,15,30,60];
+let data,age,list=[],idx=0,mode=store.get('mode')||'one',tIdx=0,tTimer=null,hideT=null,lock=null,faded=false;
+const vid=$('#vid'),bar=$('#bar'),fade=$('#fade'),player=$('#player');
+
+async function init(){
+  try{data=await (await fetch('videos.json')).json()}
+  catch(e){$('#grid').innerHTML='<div id="empty">Couldn’t load videos.json. Check it is in the same folder as index.html.</div>';return}
+  age=store.get('age');
+  if(!data.ages.includes(age))age=data.ages[0];
+  drawTabs();drawGrid();
+  const f=document.querySelector('.tile');if(f)f.focus();
+}
+function drawTabs(){
+  const t=$('#tabs');t.innerHTML='';
+  data.ages.forEach(a=>{
+    const b=document.createElement('button');b.textContent=a;
+    if(a===age)b.className='sel';
+    b.onclick=()=>{age=a;store.set('age',a);drawTabs();drawGrid();document.querySelectorAll('#tabs button').forEach(x=>{if(x.textContent===a)x.focus()})};
+    t.appendChild(b);
+  });
+}
+function drawGrid(){
+  list=data.videos.filter(v=>v.age===age);
+  const g=$('#grid');g.innerHTML='';
+  if(!list.length){g.innerHTML='<div id="empty">No videos for this age yet. Add some to videos.json.</div>';return}
+  const all=document.createElement('button');all.className='tile all';all.textContent='Play all in order';
+  all.onclick=()=>play(0,'all');g.appendChild(all);
+  list.forEach((v,i)=>{
+    const b=document.createElement('button');b.className='tile';b.textContent=v.title;
+    b.onclick=()=>play(i,'one');g.appendChild(b);
+  });
+}
+function url(v){return (data.base?data.base.replace(/\/$/,'')+'/':'')+v.file}
+function load(){
+  const it=list[idx];
+  vid.src=url(it);vid.loop=mode==='one';
+  vid.muted=store.get('muted')==='1';
+  vid.className=store.get('flip')==='1'?'flip':'';
+  vid.play().catch(()=>{});
+  labels();
+}
+function labels(){
+  $('#bMode').textContent=mode==='one'?'Loop one':'Play all';
+  $('#bSound').textContent=vid.muted?'Sound off':'Sound on';
+  $('#bTimer').textContent=TIMERS[tIdx]?'Timer '+TIMERS[tIdx]+' min':'Timer off';
+}
+async function wake(){try{lock=await navigator.wakeLock.request('screen')}catch(e){}}
+function play(i,m){
+  mode=m;store.set('mode',m);idx=i;player.style.display='block';
+  unfade();load();wake();showBar();
+}
+function close(){
+  vid.pause();vid.removeAttribute('src');vid.load();player.style.display='none';
+  clearTimeout(tTimer);tIdx=0;unfade();
+  try{lock&&lock.release()}catch(e){}
+  const f=document.querySelector('.tile');if(f)f.focus();
+}
+function showBar(){
+  bar.classList.remove('hide');clearTimeout(hideT);
+  hideT=setTimeout(()=>{bar.classList.add('hide');document.activeElement&&document.activeElement.blur()},5000);
+}
+function unfade(){
+  if(faded){faded=false;fade.style.transition='none';fade.style.opacity=0;vid.play().catch(()=>{})}
+  else fade.style.opacity=0;
+}
+function setTimer(){
+  tIdx=(tIdx+1)%TIMERS.length;clearTimeout(tTimer);
+  if(TIMERS[tIdx])tTimer=setTimeout(()=>{
+    faded=true;fade.style.transition='opacity 8s linear';fade.style.opacity=1;
+    setTimeout(()=>{if(faded)vid.pause()},8000);
+  },TIMERS[tIdx]*60000);
+  labels();
+}
+vid.onended=()=>{if(mode==='all'){idx=(idx+1)%list.length;load()}};
+$('#bBack').onclick=close;
+$('#bNext').onclick=()=>{idx=(idx+1)%list.length;load()};
+$('#bMode').onclick=()=>{mode=mode==='one'?'all':'one';store.set('mode',mode);vid.loop=mode==='one';labels()};
+$('#bSound').onclick=()=>{vid.muted=!vid.muted;store.set('muted',vid.muted?'1':'0');labels()};
+$('#bFlip').onclick=()=>{const f=store.get('flip')==='1'?'0':'1';store.set('flip',f);vid.className=f==='1'?'flip':''};
+$('#bTimer').onclick=setTimer;
+player.addEventListener('click',e=>{if(e.target===vid||e.target===fade){faded?unfade():showBar()}});
+
+function move(d){
+  const root=player.style.display==='block'?bar:document.body;
+  const bs=[...root.querySelectorAll('button')].filter(b=>b.offsetParent);
+  const cur=document.activeElement;
+  if(!bs.includes(cur)){bs[0]&&bs[0].focus();return}
+  const r=cur.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let best=null,bd=1e9;
+  bs.forEach(b=>{
+    if(b===cur)return;
+    const q=b.getBoundingClientRect(),x=q.left+q.width/2-cx,y=q.top+q.height/2-cy;
+    const horiz=d==='L'||d==='R';
+    const ok=d==='L'?(x<-5&&Math.abs(y)<r.height/2):d==='R'?(x>5&&Math.abs(y)<r.height/2):d==='U'?y<-5:y>5;
+    if(!ok)return;
+    const dist=horiz?Math.abs(x):Math.hypot(x*2,y);
+    if(dist<bd){bd=dist;best=b}
+  });
+  if(best)best.focus();
+}
+document.addEventListener('keydown',e=>{
+  const k=e.key,inPlayer=player.style.display==='block';
+  if(inPlayer){
+    if(faded){unfade();showBar();e.preventDefault();return}
+    if(k==='Escape'||k==='Backspace'){close();e.preventDefault();return}
+    if(bar.classList.contains('hide')){showBar();bar.querySelector('button').focus();e.preventDefault();return}
+    showBar();
+  }
+  const dir={ArrowLeft:'L',ArrowRight:'R',ArrowUp:'U',ArrowDown:'D'}[k];
+  if(dir){move(dir);e.preventDefault()}
+});
+init();
+</script>
+</body>
+</html>

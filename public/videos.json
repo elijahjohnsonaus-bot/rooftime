@@ -1,0 +1,11 @@
+{
+  "base": "https://pub-REPLACE-ME.r2.dev",
+  "ages": ["0-3 months", "3-6 months", "6-12 months"],
+  "videos": [
+    { "title": "Black and white shapes", "age": "0-3 months", "file": "bw-shapes.mp4" },
+    { "title": "Slow spirals", "age": "0-3 months", "file": "slow-spirals.mp4" },
+    { "title": "Drifting colour", "age": "3-6 months", "file": "drifting-colour.mp4" },
+    { "title": "Floating bubbles", "age": "3-6 months", "file": "floating-bubbles.mp4" },
+    { "title": "Gentle fish", "age": "6-12 months", "file": "gentle-fish.mp4" }
+  ]
+}
