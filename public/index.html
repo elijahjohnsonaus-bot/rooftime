@@ -5,33 +5,40 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ceiling Time</title>
 <style>
-:root{--night:#0b0c12;--card:#171a28;--sel:#262c47;--mist:#d9dcea;--lamp:#f2c879}
+:root{--ink:#090a13;--card:#14172b;--sel:#222850;--moon:#e8e4f2;--lamp:#f5c978}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--night);color:var(--mist);font-family:"Trebuchet MS",system-ui,sans-serif}
-h1{font-size:2.2rem;font-weight:500;margin:28px 28px 4px}
-p.sub{margin:0 28px;opacity:.6}
-button{font:inherit;font-size:1.3rem;color:inherit;background:var(--card);border:4px solid transparent;border-radius:18px;padding:16px 26px;cursor:pointer}
-button:focus-visible,button:focus{outline:none;border-color:var(--lamp)}
-nav{display:flex;gap:12px;flex-wrap:wrap;padding:20px 28px 8px}
-nav button{border-radius:40px}
-nav button.sel{background:var(--sel)}
-#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;padding:12px 28px 48px}
-.tile{min-height:130px;text-align:left;border-radius:10px 28px 10px 28px}
-.all{background:var(--sel)}
-#empty{padding:28px;opacity:.7}
+html,body{margin:0;min-height:100%;background:var(--ink);color:var(--moon);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif}
+header{position:relative;overflow:hidden;padding:44px 32px 16px}
+.moon{position:absolute;right:-40px;top:-70px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#f4efe0,#b9b2d6 55%,transparent 72%);opacity:.35;animation:drift 90s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate(-140px,30px)}}
+h1{position:relative;margin:0;font:400 2.7rem Georgia,"Times New Roman",serif;letter-spacing:.01em}
+.sub{position:relative;margin:8px 0 0;opacity:.65;font-size:1.15rem}
+button{font:inherit;color:inherit;border:0;cursor:pointer}
+button:focus{outline:none;box-shadow:0 0 0 4px var(--lamp)}
+#tabs{display:flex;gap:14px;flex-wrap:wrap;padding:14px 32px}
+#tabs button{display:flex;align-items:center;gap:12px;background:var(--card);padding:16px 26px;border-radius:40px;font-size:1.3rem}
+#tabs button.sel{background:var(--sel)}
+.dot{width:16px;height:16px;border-radius:50%;background:hsl(var(--h) 65% 72%)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;padding:16px 32px 56px}
+.tile{position:relative;overflow:hidden;min-height:150px;padding:20px;text-align:left;background:var(--card);border-radius:12px 32px 12px 32px;font-size:1.35rem;line-height:1.25;display:flex;align-items:flex-end}
+.tile::before{content:"";position:absolute;right:-30px;top:-30px;width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,hsl(var(--h) 60% 65% / .55),transparent 70%)}
+.tile span{position:relative}
+.tile.all{background:var(--sel);align-items:center}
+#msg{padding:14px 32px;opacity:.8;font-size:1.2rem;max-width:44rem;line-height:1.4}
 #player{position:fixed;inset:0;background:#000;display:none}
 #vid{width:100%;height:100%;object-fit:contain}
 #vid.flip{transform:rotate(180deg)}
 #bar{position:absolute;left:0;right:0;bottom:0;padding:28px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,.85));transition:opacity .4s}
+#bar button{background:rgba(255,255,255,.14);padding:14px 24px;border-radius:40px;font-size:1.2rem}
 #bar.hide{opacity:0;pointer-events:none}
 #fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 8s linear}
-@media (prefers-reduced-motion:reduce){#bar,#fade{transition:none}}
+@media (prefers-reduced-motion:reduce){.moon{animation:none}#bar,#fade{transition:none}}
 </style>
 </head>
 <body>
-<h1>Ceiling Time</h1>
-<p class="sub">Pick an age, pick a video, lie back.</p>
+<header><div class="moon"></div><h1>Ceiling Time</h1><p class="sub">Pick an age, pick a video, lie back.</p></header>
 <nav id="tabs"></nav>
+<div id="msg" hidden></div>
 <div id="grid"></div>
 
 <div id="player">
@@ -48,48 +55,60 @@ nav button.sel{background:var(--sel)}
 </div>
 
 <script>
+const BASE='https://pub-REPLACE-ME.r2.dev';
+const HUES=[258,310,28,170,205,50];
 const $=s=>document.querySelector(s);
 const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
 const TIMERS=[0,15,30,60];
-let data,age,list=[],idx=0,mode=store.get('mode')||'one',tIdx=0,tTimer=null,hideT=null,lock=null,faded=false;
+let vids=[],ages=[],age,list=[],idx=0,mode=store.get('mode')||'one',tIdx=0,tTimer=null,hideT=null,lock=null,faded=false;
 const vid=$('#vid'),bar=$('#bar'),fade=$('#fade'),player=$('#player');
 
+function say(t){const m=$('#msg');m.textContent=t;m.hidden=!t}
 async function init(){
-  try{data=await (await fetch('videos.json')).json()}
-  catch(e){$('#grid').innerHTML='<div id="empty">Couldn’t load videos.json. Check it is in the same folder as index.html.</div>';return}
-  age=store.get('age');
-  if(!data.ages.includes(age))age=data.ages[0];
+  try{
+    const keys=await (await fetch('/api/videos')).json();
+    vids=keys.map(k=>{
+      const p=k.split('/'),file=p.pop(),t=file.replace(/\.[^.]+$/,'').replace(/[-_]+/g,' ').trim();
+      return{key:k,age:p.length?p[0]:'More',title:t.charAt(0).toUpperCase()+t.slice(1)};
+    });
+  }catch(e){say('Couldn’t load the video list. Check the R2 binding in wrangler.jsonc and that the bucket exists.');return}
+  ages=[...new Set(vids.map(v=>v.age))].sort((a,b)=>(parseFloat(a)||999)-(parseFloat(b)||999)||a.localeCompare(b));
+  if(!ages.length){say('No videos yet. In your R2 bucket, put each video inside an age folder, like “0-3 months”.');return}
+  age=store.get('age');if(!ages.includes(age))age=ages[0];
+  if(BASE.includes('REPLACE-ME'))say('Set BASE at the top of index.html to your R2 public link.');
   drawTabs();drawGrid();
   const f=document.querySelector('.tile');if(f)f.focus();
 }
+const hue=a=>HUES[ages.indexOf(a)%HUES.length];
 function drawTabs(){
   const t=$('#tabs');t.innerHTML='';
-  data.ages.forEach(a=>{
-    const b=document.createElement('button');b.textContent=a;
+  ages.forEach(a=>{
+    const b=document.createElement('button');
+    b.innerHTML='<span class="dot" style="--h:'+hue(a)+'"></span>';
+    b.appendChild(document.createTextNode(a));
     if(a===age)b.className='sel';
-    b.onclick=()=>{age=a;store.set('age',a);drawTabs();drawGrid();document.querySelectorAll('#tabs button').forEach(x=>{if(x.textContent===a)x.focus()})};
+    b.onclick=()=>{age=a;store.set('age',a);drawTabs();drawGrid();[...document.querySelectorAll('#tabs button')][ages.indexOf(a)].focus()};
     t.appendChild(b);
   });
 }
 function drawGrid(){
-  list=data.videos.filter(v=>v.age===age);
-  const g=$('#grid');g.innerHTML='';
-  if(!list.length){g.innerHTML='<div id="empty">No videos for this age yet. Add some to videos.json.</div>';return}
-  const all=document.createElement('button');all.className='tile all';all.textContent='Play all in order';
+  list=vids.filter(v=>v.age===age).sort((a,b)=>a.title.localeCompare(b.title));
+  const g=$('#grid');g.innerHTML='';g.style.setProperty('--h',hue(age));
+  g.style.cssText='--h:'+hue(age);
+  const all=document.createElement('button');all.className='tile all';all.innerHTML='<span>Play all in order</span>';
   all.onclick=()=>play(0,'all');g.appendChild(all);
   list.forEach((v,i)=>{
-    const b=document.createElement('button');b.className='tile';b.textContent=v.title;
+    const b=document.createElement('button');b.className='tile';
+    b.innerHTML='<span></span>';b.firstChild.textContent=v.title;
     b.onclick=()=>play(i,'one');g.appendChild(b);
   });
 }
-function url(v){return (data.base?data.base.replace(/\/$/,'')+'/':'')+v.file}
+function url(v){return BASE.replace(/\/$/,'')+'/'+v.key.split('/').map(encodeURIComponent).join('/')}
 function load(){
-  const it=list[idx];
-  vid.src=url(it);vid.loop=mode==='one';
+  vid.src=url(list[idx]);vid.loop=mode==='one';
   vid.muted=store.get('muted')==='1';
   vid.className=store.get('flip')==='1'?'flip':'';
-  vid.play().catch(()=>{});
-  labels();
+  vid.play().catch(()=>{});labels();
 }
 function labels(){
   $('#bMode').textContent=mode==='one'?'Loop one':'Play all';
@@ -97,10 +116,7 @@ function labels(){
   $('#bTimer').textContent=TIMERS[tIdx]?'Timer '+TIMERS[tIdx]+' min':'Timer off';
 }
 async function wake(){try{lock=await navigator.wakeLock.request('screen')}catch(e){}}
-function play(i,m){
-  mode=m;store.set('mode',m);idx=i;player.style.display='block';
-  unfade();load();wake();showBar();
-}
+function play(i,m){mode=m;store.set('mode',m);idx=i;player.style.display='block';unfade();load();wake();showBar()}
 function close(){
   vid.pause();vid.removeAttribute('src');vid.load();player.style.display='none';
   clearTimeout(tTimer);tIdx=0;unfade();
@@ -142,17 +158,17 @@ function move(d){
   bs.forEach(b=>{
     if(b===cur)return;
     const q=b.getBoundingClientRect(),x=q.left+q.width/2-cx,y=q.top+q.height/2-cy;
-    const horiz=d==='L'||d==='R';
+    const h=d==='L'||d==='R';
     const ok=d==='L'?(x<-5&&Math.abs(y)<r.height/2):d==='R'?(x>5&&Math.abs(y)<r.height/2):d==='U'?y<-5:y>5;
     if(!ok)return;
-    const dist=horiz?Math.abs(x):Math.hypot(x*2,y);
+    const dist=h?Math.abs(x):Math.hypot(x*2,y);
     if(dist<bd){bd=dist;best=b}
   });
   if(best)best.focus();
 }
 document.addEventListener('keydown',e=>{
-  const k=e.key,inPlayer=player.style.display==='block';
-  if(inPlayer){
+  const k=e.key;
+  if(player.style.display==='block'){
     if(faded){unfade();showBar();e.preventDefault();return}
     if(k==='Escape'||k==='Backspace'){close();e.preventDefault();return}
     if(bar.classList.contains('hide')){showBar();bar.querySelector('button').focus();e.preventDefault();return}
